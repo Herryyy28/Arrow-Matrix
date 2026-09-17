@@ -408,26 +408,22 @@ class ShapeSilhouettePainter extends CustomPainter {
         final right = left + cellSize;
         final bottom = top + cellSize;
 
-        final rect = Rect.fromLTRB(left + 1, top + 1, right - 1, bottom - 1);
-        final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(6));
-        canvas.drawRRect(rrect, fillPaint);
-
-        // Draw outer borders for cells adjacent to non-playable areas or grid boundaries
+        // Draw outer borders ONLY facing non-playable space
         if (!shapeDefinition.isPlayable(r - 1, c)) {
-          borderPath.moveTo(left + 4, top);
-          borderPath.lineTo(right - 4, top);
+          borderPath.moveTo(left, top);
+          borderPath.lineTo(right, top);
         }
         if (!shapeDefinition.isPlayable(r + 1, c)) {
-          borderPath.moveTo(left + 4, bottom);
-          borderPath.lineTo(right - 4, bottom);
+          borderPath.moveTo(left, bottom);
+          borderPath.lineTo(right, bottom);
         }
         if (!shapeDefinition.isPlayable(r, c - 1)) {
-          borderPath.moveTo(left, top + 4);
-          borderPath.lineTo(left, bottom - 4);
+          borderPath.moveTo(left, top);
+          borderPath.lineTo(left, bottom);
         }
         if (!shapeDefinition.isPlayable(r, c + 1)) {
-          borderPath.moveTo(right, top + 4);
-          borderPath.lineTo(right, bottom - 4);
+          borderPath.moveTo(right, top);
+          borderPath.lineTo(right, bottom);
         }
       }
     }

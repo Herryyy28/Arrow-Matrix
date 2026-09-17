@@ -1,8 +1,10 @@
 import 'dart:math';
 import '../../models/arrow_direction.dart';
+import '../../models/arrow_network.dart';
 import '../../models/arrow_piece.dart';
 import '../../models/board.dart';
 import '../../models/level_data.dart';
+import '../../models/shape_definition.dart';
 import '../solver/puzzle_solver.dart';
 
 class GridTierConfig {
@@ -11,6 +13,7 @@ class GridTierConfig {
   final int gridRows;
   final int gridCols;
   final int arrowCount;
+  final int targetDependencyDepth;
   final String themeBadge;
 
   const GridTierConfig({
@@ -19,64 +22,69 @@ class GridTierConfig {
     required this.gridRows,
     required this.gridCols,
     required this.arrowCount,
+    required this.targetDependencyDepth,
     required this.themeBadge,
   });
 }
 
 class GridLevelGenerator {
-  /// Cache/Generator version identifier to ensure old simple outward cached levels are updated.
-  static const int generatorVersion = 2;
+  /// Cache/Generator version identifier to ensure old cached levels upgrade.
+  static const int generatorVersion = 3;
 
-  /// Gets grid configuration for a level number (1 to 1000+).
+  /// Gets grid & difficulty tier configuration for a level number (1 to 1000+).
   static GridTierConfig getGridConfig(int levelNumber) {
     if (levelNumber <= 10) {
       return GridTierConfig(
         tierNumber: 1,
-        name: '5x5 GRID BEGINNER',
+        name: 'BEGINNER SHAPE MAZE',
         gridRows: 5,
         gridCols: 5,
-        arrowCount: (6 + (levelNumber * 0.6)).round().clamp(6, 12),
+        arrowCount: (4 + (levelNumber * 0.4)).round().clamp(4, 7),
+        targetDependencyDepth: 2,
         themeBadge: 'NEON BEGINNER',
       );
     } else if (levelNumber <= 25) {
       return GridTierConfig(
         tierNumber: 2,
-        name: '6x6 GRID INTERMEDIATE',
+        name: 'INTERMEDIATE INTERLOCKED',
         gridRows: 6,
         gridCols: 6,
-        arrowCount: (12 + (levelNumber * 0.4)).round().clamp(12, 20),
+        arrowCount: (8 + (levelNumber * 0.35)).round().clamp(8, 14),
+        targetDependencyDepth: 3,
         themeBadge: 'CYBER MATRIX',
       );
     } else if (levelNumber <= 50) {
       return GridTierConfig(
         tierNumber: 3,
-        name: '7x7 GRID ADVANCED',
+        name: 'ADVANCED GRAPH MAZE',
         gridRows: 7,
         gridCols: 7,
-        arrowCount: (18 + (levelNumber * 0.35)).round().clamp(18, 30),
+        arrowCount: (14 + (levelNumber * 0.3)).round().clamp(14, 22),
+        targetDependencyDepth: 5,
         themeBadge: 'EMERALD WEAVE',
       );
     } else {
       return GridTierConfig(
         tierNumber: 4,
-        name: '8x8 GRID MASTER',
+        name: 'MASTER TOPOLOGY MESH',
         gridRows: 8,
         gridCols: 8,
-        arrowCount: (24 + ((levelNumber % 50) * 0.4)).round().clamp(24, 48),
+        arrowCount: (20 + ((levelNumber % 50) * 0.3)).round().clamp(20, 36),
+        targetDependencyDepth: 7,
         themeBadge: 'TITAN MASTER',
       );
     }
   }
 
-  /// Generates a seed-reproducible, 100% solvable, inter-blocking arrow puzzle.
+  /// Generates a seed-reproducible, 100% solvable, interlocked directional puzzle.
   static LevelData generateGridLevel(int levelNumber, {int? customSeed}) {
     final baseSeed = customSeed ?? (levelNumber * 10007 + 7919);
     final config = getGridConfig(levelNumber);
     final worldNumber = ((levelNumber - 1) ~/ 100) + 1;
 
-    for (int attempt = 0; attempt < 30; attempt++) {
+    for (int attempt = 0; attempt < 50; attempt++) {
       final rng = Random(baseSeed + attempt * 13337);
-      final level = _tryBuildReverseGridLevel(
+      final level = _tryBuildInterlockedLevel(
         levelNumber: levelNumber,
         config: config,
         worldNumber: worldNumber,
@@ -86,49 +94,71 @@ class GridLevelGenerator {
       if (level != null) {
         final board = level.createInitialBoard();
         final solution = PuzzleSolver.findSolution(board);
+
         if (solution != null && solution.length == level.initialArrows.length) {
-          // Ensure puzzle has at least some blocking arrows (not all free immediately unless level 1)
           final removable = board.getRemovableArrows();
-          if (levelNumber == 1 || removable.length < level.initialArrows.length) {
+          final dependencyDepth = board.network?.chainDepth ?? 1;
+
+          // Ensure puzzle has interlocked blocking dependencies (not all free immediately unless level 1)
+          if (levelNumber == 1 ||
+              (removable.length < level.initialArrows.length && dependencyDepth >= config.targetDependencyDepth)) {
             return level;
           }
         }
       }
     }
 
-    return _buildFallbackGridLevel(levelNumber, config, worldNumber);
+    return _buildFallbackInterlockedLevel(levelNumber, config, worldNumber);
   }
 
-  /// Generates arrows in REVERSE sequence from empty board state so that arrows block each other.
-  static LevelData? _tryBuildReverseGridLevel({
+  /// Generates interlocked directed dependency graph inside shape silhouettes.
+  static LevelData? _tryBuildInterlockedLevel({
     required int levelNumber,
     required GridTierConfig config,
     required int worldNumber,
     required Random rng,
   }) {
-    final rows = config.gridRows;
-    final cols = config.gridCols;
-    final targetCount = config.arrowCount;
+    final shape = ShapeLibrary.allShapes[(levelNumber - 1) % ShapeLibrary.allShapes.length];
+    final rows = shape.rows;
+    final cols = shape.cols;
 
     final placedArrows = <ArrowPiece>[];
     final occupied = List.generate(rows, (_) => List.filled(cols, false));
 
+    // Calculate maximum target arrows inside the shape mask
+    int playableCellCount = 0;
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        if (shape.isPlayable(r, c)) playableCellCount++;
+      }
+    }
+    final targetCount = (playableCellCount * 0.70).round().clamp(4, config.arrowCount);
+
     for (int step = 0; step < targetCount; step++) {
-      // Find all valid placements (r, c, dir) for the next arrow in reverse sequence.
-      final candidates = <_CandidatePlacement>[];
+      final candidates = <_InterlockedCandidate>[];
 
       for (int r = 0; r < rows; r++) {
         for (int c = 0; c < cols; c++) {
-          if (occupied[r][c]) continue;
+          if (!shape.isPlayable(r, c) || occupied[r][c]) continue;
 
           for (final dir in ArrowDirection.values) {
             if (_isExitPathClear(r, c, dir, rows, cols, occupied)) {
               final blocksCount = _countBlockedExistingArrows(r, c, dir, placedArrows, rows, cols);
-              candidates.add(_CandidatePlacement(
+              final isFacing = _isFacingAnyArrow(r, c, dir, placedArrows);
+              final isCrossing = _isCrossingAnyArrow(r, c, dir, placedArrows, rows, cols);
+
+              double score = blocksCount * 10.0;
+              if (isFacing) score += 15.0;
+              if (isCrossing) score += 8.0;
+
+              candidates.add(_InterlockedCandidate(
                 row: r,
                 col: c,
                 direction: dir,
                 blocksCount: blocksCount,
+                isFacing: isFacing,
+                isCrossing: isCrossing,
+                interlockScore: score,
               ));
             }
           }
@@ -136,23 +166,18 @@ class GridLevelGenerator {
       }
 
       if (candidates.isEmpty) {
-        if (placedArrows.length >= (targetCount * 0.7).round() && placedArrows.length >= 4) {
-          break; // Good density reached
+        if (placedArrows.length >= (targetCount * 0.55).round() && placedArrows.length >= 3) {
+          break; // Good density reached inside shape
         }
-        return null; // Retry with different attempt seed
+        return null; // Retry with different seed
       }
 
-      // Prioritize placements that block existing arrows (interlocking puzzle candidates)
-      final blockingCandidates = candidates.where((c) => c.blocksCount > 0).toList();
-      _CandidatePlacement chosen;
+      // Prioritize high interlock score candidates (facing, blocking, crossing)
+      candidates.sort((a, b) => b.interlockScore.compareTo(a.interlockScore));
 
-      if (blockingCandidates.isNotEmpty && (step > 0) && rng.nextDouble() < 0.82) {
-        blockingCandidates.shuffle(rng);
-        chosen = blockingCandidates.first;
-      } else {
-        candidates.shuffle(rng);
-        chosen = candidates.first;
-      }
+      final topCandidates = candidates.take(max(1, (candidates.length * 0.3).round())).toList();
+      topCandidates.shuffle(rng);
+      final chosen = topCandidates.first;
 
       final arrowId = 'a_${step + 1}';
       placedArrows.add(ArrowPiece(
@@ -166,18 +191,47 @@ class GridLevelGenerator {
 
     if (placedArrows.isEmpty) return null;
 
+    // Build directed network graph
+    final nodes = <ArrowNode>[];
+    for (final arrow in placedArrows) {
+      final connectsTo = <String>[];
+      final dependsOn = <String>[];
+
+      for (final other in placedArrows) {
+        if (other.id == arrow.id) continue;
+        if (_doesArrowBlock(arrow, other, rows, cols)) {
+          connectsTo.add(other.id);
+        }
+        if (_doesArrowBlock(other, arrow, rows, cols)) {
+          dependsOn.add(other.id);
+        }
+      }
+
+      nodes.add(ArrowNode(
+        id: arrow.id,
+        row: arrow.row,
+        col: arrow.column,
+        direction: arrow.direction,
+        connectsToIds: connectsTo,
+        dependsOnIds: dependsOn,
+      ));
+    }
+
+    final network = ArrowNetwork.fromNodeList(nodes);
+
     return LevelData(
       levelNumber: levelNumber,
       rows: rows,
       cols: cols,
+      shapeDefinition: shape,
       initialArrows: placedArrows,
       worldNumber: worldNumber,
-      difficultyLabel: config.name,
-      title: '${config.themeBadge} #${levelNumber}',
+      difficultyLabel: '${shape.name} (${shape.difficulty})',
+      title: '${shape.name.toUpperCase()} #${levelNumber}',
+      network: network,
     );
   }
 
-  /// Checks if an arrow starting at (r, c) facing dir can reach the board boundary without hitting any occupied cell.
   static bool _isExitPathClear(
     int r,
     int c,
@@ -190,17 +244,13 @@ class GridLevelGenerator {
     int currC = c + dir.dc;
 
     while (currR >= 0 && currR < rows && currC >= 0 && currC < cols) {
-      if (occupied[currR][currC]) {
-        return false;
-      }
+      if (occupied[currR][currC]) return false;
       currR += dir.dr;
       currC += dir.dc;
     }
-
     return true;
   }
 
-  /// Counts how many already placed arrows would be blocked by placing a new arrow at (r, c).
   static int _countBlockedExistingArrows(
     int r,
     int c,
@@ -209,57 +259,116 @@ class GridLevelGenerator {
     int rows,
     int cols,
   ) {
-    int blocked = 0;
+    int count = 0;
     for (final arrow in placedArrows) {
-      // Check if (r, c) lies along arrow's forward exit ray
-      int checkR = arrow.row + arrow.direction.dr;
-      int checkC = arrow.column + arrow.direction.dc;
-
-      while (checkR >= 0 && checkR < rows && checkC >= 0 && checkC < cols) {
-        if (checkR == r && checkC == c) {
-          blocked++;
-          break;
-        }
-        checkR += arrow.direction.dr;
-        checkC += arrow.direction.dc;
+      if (_doesCellBlockArrow(r, c, arrow, rows, cols)) {
+        count++;
       }
     }
-    return blocked;
+    return count;
   }
 
-  static LevelData _buildFallbackGridLevel(int levelNumber, GridTierConfig config, int worldNumber) {
-    final rows = config.gridRows;
-    final cols = config.gridCols;
+  static bool _doesCellBlockArrow(int r, int c, ArrowPiece arrow, int rows, int cols) {
+    int checkR = arrow.row + arrow.direction.dr;
+    int checkC = arrow.column + arrow.direction.dc;
 
-    final arrows = [
-      ArrowPiece(id: 'a_1', row: 1, column: 1, direction: ArrowDirection.down),
-      ArrowPiece(id: 'a_2', row: 2, column: 1, direction: ArrowDirection.right),
-      ArrowPiece(id: 'a_3', row: 2, column: cols - 1, direction: ArrowDirection.right),
-    ];
+    while (checkR >= 0 && checkR < rows && checkC >= 0 && checkC < cols) {
+      if (checkR == r && checkC == c) return true;
+      checkR += arrow.direction.dr;
+      checkC += arrow.direction.dc;
+    }
+    return false;
+  }
+
+  static bool _doesArrowBlock(ArrowPiece blocker, ArrowPiece target, int rows, int cols) {
+    return _doesCellBlockArrow(blocker.row, blocker.column, target, rows, cols);
+  }
+
+  static bool _isFacingAnyArrow(int r, int c, ArrowDirection dir, List<ArrowPiece> placedArrows) {
+    for (final other in placedArrows) {
+      final isOpposite = (dir.dr == -other.direction.dr && dir.dc == -other.direction.dc);
+      if (isOpposite) {
+        if (dir == ArrowDirection.left || dir == ArrowDirection.right) {
+          if (r == other.row) return true;
+        } else {
+          if (c == other.column) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  static bool _isCrossingAnyArrow(
+    int r,
+    int c,
+    ArrowDirection dir,
+    List<ArrowPiece> placedArrows,
+    int rows,
+    int cols,
+  ) {
+    for (final other in placedArrows) {
+      final isPerpendicular = (dir.dr * other.direction.dr + dir.dc * other.direction.dc) == 0;
+      if (isPerpendicular) {
+        if (dir == ArrowDirection.left || dir == ArrowDirection.right) {
+          if (c <= max(r, other.column) && c >= min(r, other.column)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  static LevelData _buildFallbackInterlockedLevel(int levelNumber, GridTierConfig config, int worldNumber) {
+    final shape = ShapeLibrary.allShapes[(levelNumber - 1) % ShapeLibrary.allShapes.length];
+    final rows = shape.rows;
+    final cols = shape.cols;
+
+    final arrows = <ArrowPiece>[];
+    int count = 0;
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < cols; c++) {
+        if (shape.isPlayable(r, c) && count < 5) {
+          count++;
+          arrows.add(ArrowPiece(
+            id: 'a_$count',
+            row: r,
+            column: c,
+            direction: ArrowDirection.values[count % 4],
+          ));
+        }
+      }
+    }
 
     return LevelData(
       levelNumber: levelNumber,
       rows: rows,
       cols: cols,
+      shapeDefinition: shape,
       initialArrows: arrows,
       worldNumber: worldNumber,
-      difficultyLabel: config.name,
-      title: 'Level $levelNumber',
+      difficultyLabel: '${shape.name} (${shape.difficulty})',
+      title: '${shape.name.toUpperCase()} #${levelNumber}',
     );
   }
 }
 
-class _CandidatePlacement {
+class _InterlockedCandidate {
   final int row;
   final int col;
   final ArrowDirection direction;
   final int blocksCount;
+  final bool isFacing;
+  final bool isCrossing;
+  final double interlockScore;
 
-  _CandidatePlacement({
+  _InterlockedCandidate({
     required this.row,
     required this.col,
     required this.direction,
     required this.blocksCount,
+    required this.isFacing,
+    required this.isCrossing,
+    required this.interlockScore,
   });
 }
+
 

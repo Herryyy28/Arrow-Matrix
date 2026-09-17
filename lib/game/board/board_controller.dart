@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/utils/daily_seed.dart';
 import '../../models/arrow_piece.dart';
@@ -10,6 +11,7 @@ import '../../services/audio_service.dart';
 import '../../services/haptic_service.dart';
 import '../../services/storage_service.dart';
 import '../generator/level_generator.dart';
+import '../painters/maze_path_painter.dart';
 import '../puzzle/repository/puzzle_repository.dart';
 import '../scoring/score_calculator.dart';
 import '../solver/puzzle_solver.dart';
@@ -58,6 +60,7 @@ class BoardController extends ChangeNotifier {
   String? _guidanceArrowId;
   bool? _guidancePathClear;
   ArrowExitPath? _previewPath;
+  ActivePathAnimation? _activePathAnimation;
 
   final List<GameSnapshot> _undoHistory = [];
 
@@ -66,6 +69,9 @@ class BoardController extends ChangeNotifier {
     required this.audioService,
     required this.hapticService,
   });
+
+  List<String> _unlockedArrowIds = [];
+  bool _developerDebugMode = false;
 
   // Getters
   Board? get board => _board;
@@ -84,8 +90,16 @@ class BoardController extends ChangeNotifier {
   String? get guidanceArrowId => _guidanceArrowId;
   bool? get guidancePathClear => _guidancePathClear;
   ArrowExitPath? get previewPath => _previewPath;
+  ActivePathAnimation? get activePathAnimation => _activePathAnimation;
+  List<String> get unlockedArrowIds => _unlockedArrowIds;
+  bool get developerDebugMode => _developerDebugMode;
   bool get canUndo => _undoCount > 0 && _undoHistory.isNotEmpty && _state == GameStateEnum.playing;
   bool get canUseHint => _hintCount > 0 && _state == GameStateEnum.playing;
+
+  void toggleDeveloperDebugMode() {
+    _developerDebugMode = !_developerDebugMode;
+    notifyListeners();
+  }
 
   /// Loads a level by level number or custom generated LevelData.
   void loadLevel(int levelNumber, {LevelData? customLevel, bool isDaily = false}) {
@@ -105,6 +119,7 @@ class BoardController extends ChangeNotifier {
     _guidanceArrowId = null;
     _guidancePathClear = null;
     _previewPath = null;
+    _unlockedArrowIds.clear();
     _undoHistory.clear();
     _state = GameStateEnum.playing;
     notifyListeners();
@@ -167,14 +182,49 @@ class BoardController extends ChangeNotifier {
 
       // Set moving status
       _updateArrowState(arrow.id, isMoving: true);
-      notifyListeners();
 
-      await Future.delayed(const Duration(milliseconds: 220));
+      // Construct polyline path points for Real Path Movement Animation
+      final cellSize = 60.0; // Dynamic scale step
+      final pathPoints = pathInfo.pathCells.map((pt) {
+        return Offset((pt.y + 0.5) * cellSize, (pt.x + 0.5) * cellSize);
+      }).toList();
+
+      // Add boundary exit point past the edge
+      if (pathPoints.isNotEmpty) {
+        final lastPt = pathPoints.last;
+        final exitOffset = Offset(
+          lastPt.dx + arrow.direction.dc * cellSize * 1.5,
+          lastPt.dy + arrow.direction.dr * cellSize * 1.5,
+        );
+        pathPoints.add(exitOffset);
+      }
+
+      // Smooth multi-frame animation step loop (240ms duration)
+      const steps = 12;
+      for (int i = 1; i <= steps; i++) {
+        final progress = i / steps;
+        _activePathAnimation = ActivePathAnimation(
+          points: pathPoints,
+          progress: progress,
+          color: const Color(0xFFFFD700),
+        );
+        notifyListeners();
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+
+      _activePathAnimation = null;
+
+      // Track removable arrows before move to identify newly unlocked arrows
+      final prevRemovable = _board!.getRemovableArrows().map((a) => a.id).toSet();
 
       // Simulate state transitions (gate open, key collect, lock unlock)
       _board = PuzzleSolver.simulateMove(_board!, arrow);
       _score += AppConstants.scorePerArrow;
       _movesCount++;
+
+      // Trigger subtle unlock cascade pulse for newly unblocked arrows
+      final newRemovable = _board!.getRemovableArrows().map((a) => a.id).toSet();
+      _unlockedArrowIds = newRemovable.difference(prevRemovable).toList();
 
       final isFinalKey = arrow.isKeyArrow || arrow.isTransformedToKey || _board!.activeArrowCount == 1;
 
@@ -185,6 +235,12 @@ class BoardController extends ChangeNotifier {
         audioService.playArrowExit();
       }
 
+      // Clear unlocked highlight after brief 400ms pulse
+      Future.delayed(const Duration(milliseconds: 400), () {
+        _unlockedArrowIds.clear();
+        notifyListeners();
+      });
+
       // Check win condition
       if (_board!.isCleared) {
         await _handleLevelComplete();
@@ -192,7 +248,7 @@ class BoardController extends ChangeNotifier {
         notifyListeners();
       }
     } else {
-      // Invalid Move!
+      // Invalid Move! Trigger Resistance Nudge Feedback!
       _invalidArrowId = arrow.id;
       _mistakesCount++;
       _hearts--;
@@ -214,8 +270,8 @@ class BoardController extends ChangeNotifier {
     }
   }
 
-  /// Executes Undo to restore previous board state snapshot.
-  void performUndo() {
+  /// Executes Undo to restore previous board state snapshot with reverse path animation.
+  Future<void> performUndo() async {
     if (!canUndo || _board == null) return;
 
     final snapshot = _undoHistory.removeLast();

@@ -72,6 +72,7 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return InteractiveButton(
       onPressed: enabled ? onPressed : null,
@@ -81,16 +82,32 @@ class _ActionButton extends StatelessWidget {
           Stack(
             clipBehavior: Clip.none,
             children: [
-              Material(
-                color: enabled ? primaryColor.withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.1),
-                shape: const CircleBorder(),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Icon(
-                    icon,
-                    size: 26,
-                    color: enabled ? primaryColor : Colors.grey,
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: enabled
+                      ? primaryColor.withValues(alpha: 0.15)
+                      : Colors.grey.withValues(alpha: 0.1),
+                  boxShadow: [
+                    if (enabled)
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                  ],
+                  border: Border.all(
+                    color: enabled
+                        ? primaryColor.withValues(alpha: 0.4)
+                        : Colors.grey.withValues(alpha: 0.2),
+                    width: 1.5,
                   ),
+                ),
+                padding: const EdgeInsets.all(14),
+                child: Icon(
+                  icon,
+                  size: 26,
+                  color: enabled ? primaryColor : Colors.grey,
                 ),
               ),
               if (badgeText != null)
@@ -98,17 +115,24 @@ class _ActionButton extends StatelessWidget {
                   right: -4,
                   top: -4,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
                       color: enabled ? primaryColor : Colors.grey,
                       borderRadius: BorderRadius.circular(10),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
                     ),
                     child: Text(
                       badgeText!,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 10,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ),
@@ -122,7 +146,8 @@ class _ActionButton extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 12,
-              fontWeight: FontWeight.bold,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
               color: enabled ? Theme.of(context).colorScheme.onSurface : Colors.grey,
             ),
           ),

@@ -8,6 +8,7 @@ import '../../../game/painters/network_painter.dart';
 import '../../../models/board.dart';
 import '../../../models/shape_definition.dart';
 
+import '../../../game/painters/maze_path_painter.dart';
 import '../../../widgets/game_particle_overlay.dart';
 
 class BoardWidget extends StatefulWidget {
@@ -101,22 +102,8 @@ class _BoardWidgetState extends State<BoardWidget> with SingleTickerProviderStat
               child: Container(
                 width: boardSize,
                 height: boardSize,
-                padding: const EdgeInsets.all(6.0),
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-                      blurRadius: 16,
-                      offset: const Offset(0, 8),
-                    )
-                  ],
-                  border: Border.all(
-                    color: isDark ? AppColors.gridBorderDark : AppColors.gridBorderLight,
-                    width: 2,
-                  ),
-                ),
+                padding: EdgeInsets.zero,
+                color: Colors.transparent,
                 child: Stack(
                   children: [
                     InteractiveViewer(
@@ -160,6 +147,25 @@ class _BoardWidgetState extends State<BoardWidget> with SingleTickerProviderStat
                                     ),
                                   ),
                                 ),
+
+                              // 1c. Continuous Luminous Maze Path Engine
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: MazePathPainter(
+                                      board: board,
+                                      cellSize: cellSize,
+                                      selectedArrowId: widget.controller.guidanceArrowId,
+                                      guidanceArrowId: widget.controller.highlightedArrowId,
+                                      invalidArrowId: widget.controller.invalidArrowId,
+                                      unlockedArrowIds: widget.controller.unlockedArrowIds,
+                                      activeAnimation: widget.controller.activePathAnimation,
+                                      isDark: isDark,
+                                      developerDebugMode: widget.controller.developerDebugMode,
+                                    ),
+                                  ),
+                                ),
+                              ),
 
                               // 2. Ice Cells Layer
                         ...board.iceCells.map((ice) => Positioned(
@@ -253,31 +259,14 @@ class _BoardWidgetState extends State<BoardWidget> with SingleTickerProviderStat
                             ),
                           ),
 
-                        // 8. Arrows Layer
+                        // 8. Interactive Gesture Layer for Arrow Cells (No Overlay Icons)
                         ...board.arrows.map((arrow) {
-                          if (arrow.isRemoved) return const SizedBox.shrink();
+                          if (arrow.isRemoved || arrow.isMoving) return const SizedBox.shrink();
 
-                          final isInvalid = widget.controller.invalidArrowId == arrow.id;
-                          final isHighlighted = widget.controller.highlightedArrowId == arrow.id;
-                          final isGuidanceActive = widget.controller.guidanceArrowId == arrow.id;
-                          final guidanceClear = widget.controller.guidancePathClear;
-
-                          double targetX = arrow.column * cellSize;
-                          double targetY = arrow.row * cellSize;
-
-                          if (arrow.isMoving) {
-                            targetX += arrow.direction.dc * cellSize * (board.cols + 1);
-                            targetY += arrow.direction.dr * cellSize * (board.rows + 1);
-                          }
-
-                          return AnimatedPositioned(
+                          return Positioned(
                             key: ValueKey(arrow.id),
-                            duration: reduceMotion
-                                ? Duration.zero
-                                : Duration(milliseconds: arrow.isMoving ? 280 : 0),
-                            curve: Curves.easeOutCubic,
-                            left: targetX,
-                            top: targetY,
+                            left: arrow.column * cellSize,
+                            top: arrow.row * cellSize,
                             width: cellSize,
                             height: cellSize,
                             child: GestureDetector(
@@ -298,37 +287,13 @@ class _BoardWidgetState extends State<BoardWidget> with SingleTickerProviderStat
                               onLongPressEnd: (_) => widget.controller.clearGuidance(),
                               onLongPressCancel: () => widget.controller.clearGuidance(),
                               behavior: HitTestBehavior.opaque,
-                              child: AnimatedScale(
-                                scale: (!reduceMotion && arrow.isMoving)
-                                    ? 1.12
-                                    : ((!reduceMotion && (isHighlighted || isGuidanceActive)) ? 1.10 : 1.0),
-                                duration: reduceMotion
-                                    ? Duration.zero
-                                    : const Duration(milliseconds: 150),
-                                child: Stack(
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.all(3.0),
-                                      child: RepaintBoundary(
-                                        child: CustomPaint(
-                                          size: Size(cellSize - 6, cellSize - 6),
-                                          painter: ArrowPainter(
-                                            direction: arrow.direction,
-                                            isHighlighted: isHighlighted || (isGuidanceActive && (guidanceClear == true)),
-                                            isInvalid: isInvalid || (isGuidanceActive && (guidanceClear == false)),
-                                            isDark: isDark,
-                                            isStartArrow: arrow.isStartArrow,
-                                            isKeyArrow: arrow.isKeyArrow,
-                                            isTransformedToKey: arrow.isTransformedToKey,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    if (arrow.isLocked)
-                                      Positioned(
-                                        right: 2,
-                                        top: 2,
+                              child: Container(
+                                color: Colors.transparent,
+                                child: arrow.isLocked
+                                    ? Align(
+                                        alignment: Alignment.topRight,
                                         child: Container(
+                                          margin: const EdgeInsets.all(3),
                                           padding: const EdgeInsets.all(2),
                                           decoration: BoxDecoration(
                                             color: Colors.red.shade700,
@@ -336,13 +301,12 @@ class _BoardWidgetState extends State<BoardWidget> with SingleTickerProviderStat
                                           ),
                                           child: const Icon(
                                             Icons.lock_rounded,
-                                            size: 12,
+                                            size: 11,
                                             color: Colors.white,
                                           ),
                                         ),
-                                      ),
-                                  ],
-                                ),
+                                      )
+                                    : null,
                               ),
                             ),
                           );
@@ -423,29 +387,10 @@ class _BoardGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Simple Grid View: Render subtle clean cell outlines for 5x5 to 8x8 grid board
-    final paint = Paint()
-      ..color = (isDark ? AppColors.gridBorderDark : AppColors.gridBorderLight).withValues(alpha: 0.15)
-      ..strokeWidth = 0.8
-      ..style = PaintingStyle.stroke;
-
-    for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < cols; c++) {
-        if (shapeDefinition != null && !shapeDefinition!.isPlayable(r, c)) {
-          continue; // Skip grid lines outside the shape silhouette
-        }
-        final rect = Rect.fromLTWH(c * cellSize, r * cellSize, cellSize, cellSize);
-        canvas.drawRect(rect, paint);
-      }
-    }
+    // VISUAL GRID COMPLETELY REMOVED per user request.
+    // The logical grid remains active in the Board engine, but is 100% invisible visually.
   }
 
   @override
-  bool shouldRepaint(covariant _BoardGridPainter oldDelegate) {
-    return oldDelegate.rows != rows ||
-        oldDelegate.cols != cols ||
-        oldDelegate.cellSize != cellSize ||
-        oldDelegate.isDark != isDark ||
-        oldDelegate.shapeDefinition?.id != shapeDefinition?.id;
-  }
+  bool shouldRepaint(covariant _BoardGridPainter oldDelegate) => false;
 }

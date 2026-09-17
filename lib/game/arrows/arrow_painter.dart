@@ -48,106 +48,14 @@ class ArrowPainter extends CustomPainter {
       canvas.drawCircle(center, radius + 3, keyGlowPaint);
     }
 
-    // Draw background rounded pill container for arrow
-    final bgPaint = Paint()
-      ..color = isInvalid
-          ? AppColors.error
-          : (isKeyMode
-              ? AppColors.warning
-              : (isHighlighted || isStartArrow
-                  ? AppColors.warning
-                  : (isDark ? AppColors.darkCard : AppColors.lightCard)))
-      ..style = PaintingStyle.fill;
-
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: isDark ? 0.35 : 0.12)
-      ..style = PaintingStyle.fill;
-
-    // Draw 3D shadow depth
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCircle(center: center.translate(0, 3.0), radius: radius),
-        Radius.circular(radius * 0.4),
-      ),
-      shadowPaint,
-    );
-
-    // Draw container box
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCircle(center: center, radius: radius),
-        Radius.circular(radius * 0.4),
-      ),
-      bgPaint,
-    );
-
-    // 3D Top-edge Specular Bevel Highlight
-    final specularPaint = Paint()
-      ..color = Colors.white.withValues(alpha: isDark ? 0.18 : 0.45)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCircle(center: center.translate(0, -1.0), radius: radius - 1),
-        Radius.circular((radius - 1) * 0.4),
-      ),
-      specularPaint,
-    );
-
-    // Draw border
-    final borderPaint = Paint()
-      ..color = isInvalid
-          ? Colors.white
-          : (isKeyMode
-              ? Colors.white
-              : (isHighlighted || isStartArrow
-                  ? AppColors.secondary
-                  : (isDark ? AppColors.gridBorderDark : AppColors.gridBorderLight)))
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = (isStartArrow || isKeyMode) ? 2.5 : 2.0;
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromCircle(center: center, radius: radius),
-        Radius.circular(radius * 0.4),
-      ),
-      borderPaint,
-    );
-
-    // Save canvas & rotate to arrow direction
-    canvas.save();
-    canvas.translate(center.dx, center.dy);
-    canvas.rotate(direction.rotationRadians);
-
-    // Arrow shaft and head color
-    final arrowPaint = Paint()
-      ..color = isInvalid || isKeyMode
-          ? Colors.white
-          : (isHighlighted || isStartArrow
-              ? Colors.white
-              : (isDark ? AppColors.arrowHighlight : AppColors.primary))
-      ..style = PaintingStyle.fill
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final arrowPath = Path();
-    final arrowLength = radius * 0.9;
-    final shaftWidth = radius * 0.22;
-    final headLength = radius * 0.45;
-    final headWidth = radius * 0.55;
-
-    // Build arrow geometry pointing RIGHT (rotated by canvas)
-    arrowPath.moveTo(-arrowLength * 0.4, -shaftWidth / 2);
-    arrowPath.lineTo(arrowLength * 0.4 - headLength, -shaftWidth / 2);
-    arrowPath.lineTo(arrowLength * 0.4 - headLength, -headWidth / 2);
-    arrowPath.lineTo(arrowLength * 0.4, 0); // Head Tip
-    arrowPath.lineTo(arrowLength * 0.4 - headLength, headWidth / 2);
-    arrowPath.lineTo(arrowLength * 0.4 - headLength, shaftWidth / 2);
-    arrowPath.lineTo(-arrowLength * 0.4, shaftWidth / 2);
-    arrowPath.close();
-
-    canvas.drawPath(arrowPath, arrowPaint);
-    canvas.restore();
+    // Special state indicators (Invalid tap pulse highlight)
+    if (isInvalid) {
+      final invalidGlowPaint = Paint()
+        ..color = AppColors.error.withValues(alpha: 0.7)
+        ..style = PaintingStyle.fill
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6.0);
+      canvas.drawCircle(center, radius * 0.5, invalidGlowPaint);
+    }
   }
 
   @override
